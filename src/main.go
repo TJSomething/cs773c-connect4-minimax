@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"math/rand"
+	"runtime"
 	"sort"
 )
 
@@ -197,12 +197,10 @@ func RunGame(redPlayer Player, blackPlayer Player,
 		// After a successful move
 		currentMove = currentPlayer.NextMove(game)
 		if err := game.Move(currentColor, currentMove); err == nil {
-			// Check for a win
-			if lineTest(game,
-				currentMove,
-				game.GetTop(currentMove)-1) != None {
+			// Check for a game ending
+			if game.IsDone() {
 				showFunc(game)
-				endFunc(currentColor)
+				endFunc(game.GetWinner())
 				break
 			}
 			// Switch players
@@ -271,6 +269,7 @@ type AlphaBetaAI struct {
 }
 
 var colCheckOrder []int
+
 func (ai AlphaBetaAI) alphabeta(game State,
 	depth int, alpha, beta float64) float64 {
 	if depth == 0 || ai.terminalTest(game) {
@@ -311,7 +310,7 @@ func (ai AlphaBetaAI) alphabeta(game State,
 }
 
 type MoveScore struct {
-	Col int
+	Col   int
 	Score float64
 }
 
@@ -324,11 +323,11 @@ func (ai AlphaBetaAI) NextMove(game State) int {
 	// Initialize order to check columns
 	if len(colCheckOrder) == 0 {
 		colCheckOrder = make([]int, 0, MaxColumns)
-		col := MaxColumns/2
+		col := MaxColumns / 2
 		// Alternate between above and below the center, starting at the center
 		for len(colCheckOrder) < MaxColumns {
 			colCheckOrder = append(colCheckOrder, col)
-			col -= 2*(col - MaxColumns/2) + col/(MaxColumns/2)
+			col -= 2*(col-MaxColumns/2) + col/(MaxColumns/2)
 		}
 	}
 
@@ -350,15 +349,14 @@ func (ai AlphaBetaAI) NextMove(game State) int {
 	}
 	for count := 0; count < MaxColumns; count++ {
 		ms := <-scores
-		fmt.Println(ms)
 		if ms.Score > bestScore {
 			bestMove = ms.Col
 			bestScore = ms.Score
-		// If our heuristic isn't very smooth, add randomness to prevent
-		// prevent predictability
+			// If our heuristic isn't very smooth, add randomness to prevent
+			// prevent predictability
 		} else if ms.Score == bestScore {
-			if math.Abs(float64(ms.Col) - MaxColumns/2 - 0.25) < 
-				math.Abs(float64(bestMove) - MaxColumns/2 - 0.25) {
+			if math.Abs(float64(ms.Col)-MaxColumns/2-0.25) <
+				math.Abs(float64(bestMove)-MaxColumns/2-0.25) {
 				bestMove = ms.Col
 			}
 		}
@@ -367,11 +365,11 @@ func (ai AlphaBetaAI) NextMove(game State) int {
 }
 
 type evalFactors struct {
-	win float64
-	lose float64
-	myOdd float64
-	theirOdd float64
-	myEven float64
+	win       float64
+	lose      float64
+	myOdd     float64
+	theirOdd  float64
+	myEven    float64
 	theirEven float64
 }
 
@@ -391,7 +389,7 @@ func countThreats(game State, p Piece, col, row int) int {
 				}
 				return 0
 			}
-		} 
+		}
 		return 1
 	}
 	return tryLine(col, row, 1, 1) +
@@ -416,25 +414,25 @@ func (f evalFactors) Eval(game State, p Piece) float64 {
 	}
 	var myOddThreats, theirOddThreats float64
 	// Odd threats
-	for row := 0; row < MaxRows; row+=2 {
-		for col := 0; col <MaxColumns; col++ {
+	for row := 0; row < MaxRows; row += 2 {
+		for col := 0; col < MaxColumns; col++ {
 			myOddThreats += float64(countThreats(game, p, col, row))
 			theirOddThreats += float64(countThreats(game, p.Other(), col, row))
 		}
 	}
 	// Even threats
 	var myEvenThreats, theirEvenThreats float64
-	for row := 1; row < MaxRows; row+=2 {
-		for col := 0; col <MaxColumns; col++ {
+	for row := 1; row < MaxRows; row += 2 {
+		for col := 0; col < MaxColumns; col++ {
 			myEvenThreats += float64(countThreats(game, p, col, row))
 			theirEvenThreats += float64(countThreats(game, p.Other(), col, row))
 		}
 	}
-	return f.win*win+
-		f.lose*lose+
-		f.myEven*myEvenThreats+
-		f.theirEven*theirEvenThreats+
-		f.myOdd*myOddThreats+
+	return f.win*win +
+		f.lose*lose +
+		f.myEven*myEvenThreats +
+		f.theirEven*theirEvenThreats +
+		f.myOdd*myOddThreats +
 		f.theirOdd*theirOddThreats
 }
 
@@ -448,40 +446,47 @@ func main() {
 	// Initialize population
 	pop := make([][6]float64, PopSize)
 	var newPop [][6]float64
-	wins := [PopSize]int
-	plays := [PopSize]int
-	fitness := [PopSize+1]float64
+	var wins [PopSize]int
+	var plays [PopSize]int
+	var fitness [PopSize + 1]float64
 	for i, genome := range pop {
-		for j, gene := range genome {
-			pop[i][j] = 2*rand.Float64()-1
+		for j, _ := range genome {
+			pop[i][j] = 2*rand.Float64() - 1
 		}
 	}
+	generation := 0
 	// Function/closures for each game
 	isDone := func(game State) bool {
-			return game.IsDone()
-		}
-	displayNoBoard := func (game State) {}
+		return game.IsDone()
+	}
+	displayNoBoard := func(game State) {}
 	showError := func(err error) {
 		fmt.Println(err)
 	}
 	winnerChan := make(chan Piece, 1)
 	var winner Piece
-	notifyWinner := func (winner Piece) {
+	notifyWinner := func(winner Piece) {
+		if winner == Red {
+			fmt.Println("Red wins!")
+		} else if winner == Black {
+			fmt.Println("Black wins!")
+		} else {
+			fmt.Println("It's a draw.")
+		}
 		winnerChan <- winner
 	}
 	// Fitness temps
 	z := 1.0 // Using 85% confidence, z=1.6 is 95%
 	var pHat float64
-	var n int
+	var n float64
 	var acc float64
 	var tempFitness float64
 	var bestFitness float64
-	var bestGenome float64
+	var bestGenome [6]float64
 	// Temps
 	var g1, g2 int
 	var f1, f2 evalFactors
 	var randNum float64
-	var rangeSize int
 	var tempGenome [6]float64
 	for {
 		// Determine fitness
@@ -493,23 +498,27 @@ func main() {
 				pop[g1][0], pop[g1][1], pop[g1][2]}
 			f2 = evalFactors{pop[g2][0], pop[g2][1], pop[g2][2],
 				pop[g2][0], pop[g2][1], pop[g2][2]}
+			fmt.Printf("Battle %v-%v:\n\t%v (%v/%v)\n\tvs\n\t%v (%v/%v)\n\n", 
+				generation, battle+1,
+				f1, wins[g1], plays[g1],
+				f2, wins[g2], plays[g2])
 			// Run a game with the competitors
 			RunGame(
 				AlphaBetaAI{
 					Red,
 					8,
-					func (game State, p Piece) float64 {
+					func(game State, p Piece) float64 {
 						return f1.Eval(game, p)
 					},
-					IsDone,
+					isDone,
 				},
 				AlphaBetaAI{
 					Black,
 					8,
-					func (game State, p Piece) float64 {
+					func(game State, p Piece) float64 {
 						return f2.Eval(game, p)
 					},
-					IsDone,
+					isDone,
 				},
 				displayNoBoard,
 				showError,
@@ -531,11 +540,11 @@ func main() {
 				// This uses the Wilson confidence interval, taken from
 				// Reddit's comment algorithm, in order to consider confidence
 				// caused by more samples
-				pHat = float64(winCount[i])/plays[i]
-				n = plays[i]
+				pHat = float64(wins[i]) / float64(plays[i])
+				n = float64(plays[i])
 				tempFitness =
-					math.Sqrt(phat+z*z/(2*n)-z*((phat*(1-phat)+z*z/(4*n))/n))/
-					(1+z*z/n)	
+					math.Sqrt(pHat+z*z/(2*n)-z*((pHat*(1-pHat)+z*z/(4*n))/n)) /
+						(1 + z*z/n)
 			} else {
 				// By default, all genomes have a 50% success ratio
 				tempFitness = 0.5
@@ -544,6 +553,11 @@ func main() {
 			// picked randomly, which we can speed up using a binary search
 			fitness[i] = acc
 			acc += tempFitness
+			// Keep the best genome of the generation
+			if tempFitness > bestFitness {
+				bestFitness = tempFitness
+				bestGenome = pop[i]
+			}
 		}
 		// Add a top to the last range
 		fitness[PopSize] = acc
@@ -552,18 +566,18 @@ func main() {
 		for i := 0; i < PopSize; i++ {
 			// SELECTION
 			// Find two random genomes
-			randNum = rand.Float64()*acc
+			randNum = rand.Float64() * acc
 			// The binary search always goes up from randNum, except at 0,
 			// so we need to compensate for that
 			if randNum != 0 {
-				g1 = sort.SearchFloat64s(fitness, randNum)
+				g1 = sort.SearchFloat64s(fitness[0:len(fitness)], randNum)
 				g1--
 			} else {
 				g1 = 0
 			}
-			randNum = rand.Float64()*acc
+			randNum = rand.Float64() * acc
 			if randNum != 0 {
-				g2 = sort.SearchFloat64s(fitness, randNum)
+				g2 = sort.SearchFloat64s(fitness[0:len(fitness)], randNum)
 				g2--
 			} else {
 				g2 = 0
@@ -581,8 +595,18 @@ func main() {
 				}
 
 				// MUTATION
-				tempGenome[j] += rand.NormFloat64()*mutationStdDev
+				tempGenome[j] += rand.NormFloat64() * mutationStdDev
 			}
+
+			newPop = append(newPop, tempGenome)
 		}
-	}	
+		pop = newPop[0:PopSize]
+
+		// Show the best fitness
+		fmt.Println("Generation:  ", generation)
+		fmt.Println("Best genome: ", bestGenome)
+		fmt.Println("Fitness:     ", bestFitness)
+		fmt.Println()
+		generation++
+	}
 }
