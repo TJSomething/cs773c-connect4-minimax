@@ -6,6 +6,7 @@ import (
 	"math"
 	"runtime"
 	"math/rand"
+	"sort"
 )
 
 const MaxColumns = 7
@@ -474,11 +475,14 @@ func main() {
 	var n int
 	var acc float64
 	var tempFitness float64
+	var bestFitness float64
+	var bestGenome float64
 	// Temps
 	var g1, g2 int
 	var f1, f2 evalFactors
 	var randNum float64
 	var rangeSize int
+	var tempGenome [6]float64
 	for {
 		// Determine fitness
 		for battle := 0; battle < BattleCount; battle++ {
@@ -521,6 +525,7 @@ func main() {
 		}
 		// Calculate win/game ratios
 		acc = 0
+		bestFitness = math.Inf(-1)
 		for i, _ := range wins {
 			if plays[i] > 0 {
 				// This uses the Wilson confidence interval, taken from
@@ -542,23 +547,42 @@ func main() {
 		}
 		// Add a top to the last range
 		fitness[PopSize] = acc
-		// Crossover
+
 		newPop = make([][6]float64, 0, PopSize)
 		for i := 0; i < PopSize; i++ {
+			// SELECTION
 			// Find two random genomes
 			randNum = rand.Float64()*acc
-			g1 = PopSize/2
-			rangeSize = PopSize/2
-			for !(fitness[g1] < randNum && fitness[g1+1] > randNum) {
-				rangeSize /= 2
-				if fitness[g1] > randNum {
-					g1 -= rangeSize
-				} else {
-					g1 += rangeSize
-				}
+			// The binary search always goes up from randNum, except at 0,
+			// so we need to compensate for that
+			if randNum != 0 {
+				g1 = sort.SearchFloat64s(fitness, randNum)
+				g1--
+			} else {
+				g1 = 0
+			}
+			randNum = rand.Float64()*acc
+			if randNum != 0 {
+				g2 = sort.SearchFloat64s(fitness, randNum)
+				g2--
+			} else {
+				g2 = 0
 			}
 
+			// CROSSOVER AND MUTATION
+			for j := 0; j < 6; j++ {
+				// CROSSOVER
+				// We're just going to pick random genes.
+				// I don't think gene locality is a thing here anyway
+				if rand.Intn(2) == 0 {
+					tempGenome[j] = pop[g1][j]
+				} else {
+					tempGenome[j] = pop[g2][j]
+				}
 
+				// MUTATION
+				tempGenome[j] += rand.NormFloat64()*mutationStdDev
+			}
 		}
 	}	
 }
