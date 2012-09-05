@@ -42,9 +42,11 @@ func (ui TextHuman) NextMove(game c4.State) int {
 	for {
 		fmt.Print("Enter the column to place your piece: ")
 
-		_, err := fmt.Scanf("%d", &col)
+		_, err := fmt.Scanln(&col)
 		if err == nil {
 			return col
+		} else {
+			fmt.Println()
 		}
 	}
 	return 0
