@@ -102,6 +102,6 @@ The order of these correspond to the values in the list above.
 ### Strengths and weaknesses
 
 I cannot actually beat this static evaluator with these coefficients. It 
-frequently leads me into unwinnable situations. However, it
-sometimes ignores immediate wins, though I almost always lose within 3 turns
-of this happening.
+frequently leads me into unwinnable situations. However, I will admit that
+I am terrible at Connect Four, as can be seen in 
+[this video](http://youtu.be/0JSBRwHBv6Q).
