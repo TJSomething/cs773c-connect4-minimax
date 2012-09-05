@@ -447,13 +447,13 @@ func main() {
 	// Use all processors
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	// Initialize population
-	pop := make([][6]float64, PopSize)
+	pop := make([][6]float64, 0, PopSize)
 	var newPop [][6]float64
 	var wins [PopSize]int
 	var fitness [PopSize + 1]float64
 	var generation int
+	var tempGenome [6]float64
 	// If there's an argument for it, read the population
-	loaded := false
 	if len(os.Args) == 2 {
 		file, err := os.Open(os.Args[1])
 		if err != nil {
@@ -465,17 +465,15 @@ func main() {
 			if err := decoder.Decode(&pop); err != nil {
 				log.Println(err)
 				log.Println("Writing new file")
-			} else {
-				loaded = true
 			}
 		}
 	}
-	// Otherwise, generate one randomly
-	if !loaded {
-		for i, genome := range pop {
-			for j, _ := range genome {
-				pop[i][j] = 2*rand.Float64() - 1
-			}
+	// Otherwise, generate one randomly. This also fills up empty space
+	// in undersized populations that have been loaded
+	for i := len(pop); i < PopSize; i++ {
+		for j := 0; j < 6; j++ {
+			tempGenome[j] = 2*rand.Float64() - 1
+			pop = append(pop, tempGenome)
 		}
 	}
 	var genomeOrder []int
@@ -508,7 +506,6 @@ func main() {
 	var g1, g2 int
 	var f1, f2 evalFactors
 	var randNum float64
-	var tempGenome [6]float64
 
 	for {
 		// Save the generation 
