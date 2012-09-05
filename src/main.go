@@ -7,6 +7,9 @@ import (
 	"math/rand"
 	"runtime"
 	"sort"
+	"os"
+	"log"
+	"encoding/json"
 )
 
 const MaxColumns = 7
@@ -448,12 +451,33 @@ func main() {
 	var newPop [][6]float64
 	var wins [PopSize]int
 	var fitness [PopSize + 1]float64
-	for i, genome := range pop {
-		for j, _ := range genome {
-			pop[i][j] = 2*rand.Float64() - 1
+	var generation int
+	// If there's an argument for it, read the population
+	loaded := false
+	if len(os.Args) == 2 {
+		file, err := os.Open(os.Args[1])
+		if err != nil {
+			if os.IsNotExist(err) {
+				log.Println(err)
+			}
+		} else {
+			decoder := json.NewDecoder(file)
+			if err := decoder.Decode(&pop); err != nil {
+				log.Println(err)
+				log.Println("Writing new file")
+			} else {
+				loaded = true
+			}
 		}
 	}
-	generation := 0
+	// Otherwise, generate one randomly
+	if !loaded {
+		for i, genome := range pop {
+			for j, _ := range genome {
+				pop[i][j] = 2*rand.Float64() - 1
+			}
+		}
+	}
 	var genomeOrder []int
 	// Function/closures for each game
 	isDone := func(game State) bool {
@@ -485,7 +509,9 @@ func main() {
 	var f1, f2 evalFactors
 	var randNum float64
 	var tempGenome [6]float64
+
 	for {
+		// Save the generation 
 		// Determine fitness
 		for battle := 0; battle < BattleCount; battle++ {
 			// Initialize a permutation of competitors
@@ -588,6 +614,16 @@ func main() {
 			newPop = append(newPop, tempGenome)
 		}
 		pop = newPop[0:PopSize]
+
+		// Write the latest generation to a file
+		if len(os.Args) == 2 {
+			if file, err := os.Create(os.Args[1]); err == nil {
+				enc := json.NewEncoder(file)	
+				enc.Encode(&generation)
+				enc.Encode(&bestGenome)
+				enc.Encode(&bestFitness)
+			}
+		}
 
 		// Show the best fitness
 		fmt.Println("Generation:  ", generation)
