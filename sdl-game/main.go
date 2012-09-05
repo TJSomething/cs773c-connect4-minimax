@@ -114,7 +114,13 @@ func main() {
 				c4.Black,
 				8,
 				func(game c4.State, p c4.Piece) float64 {
-					return c4.EvalFactors{5, -3, 1, -1, 1, -1}.Eval(game, p)
+					return c4.EvalFactors{
+							0.2502943943301069,
+							-0.4952316649483701,
+							0.3932539700819625,
+							-0.2742452616759889,
+							0.4746881137884282,
+							0.2091091127191147}.Eval(game, p)
 				},
 				func(game c4.State) bool {
 					return game.GetWinner() != c4.None
