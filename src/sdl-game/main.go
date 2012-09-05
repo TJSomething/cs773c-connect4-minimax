@@ -99,17 +99,12 @@ func main() {
 	var winner c4.Piece
 	var game c4.State
 	waitingForMove := false
-	gameOver := true
+	gameOver := false
 
 	// Get ready to write text
 	font := ttf.OpenFont("DroidSans.ttf", 36)
 	var line1, line2 *sdl.Surface
-	line1 =
-		sdl.CreateRGBSurface(0, 0, 0, 32, 0, 0, 0, 0)
-	line2 =
-		ttf.RenderText_Blended(font,
-			"Click to start...",
-			sdl.Color{255, 255, 255, 0})
+	showMessage := false
 
 	// Start a game
 	startGame := func() {
@@ -139,6 +134,7 @@ func main() {
 				}
 			})
 	}
+	go startGame()
 
 loop:
 	for {
@@ -152,7 +148,7 @@ loop:
 					drawPiece(screen, col, row, game.GetPiece(col, row))
 				}
 			}
-			if gameOver {
+			if showMessage {
 				screen.Blit(
 					&sdl.Rect{
 						int16(SCREEN_WIDTH/2 - line1.W/2),
@@ -180,10 +176,20 @@ loop:
 					e.Button == sdl.BUTTON_LEFT {
 					waitingForMove = false
 					nextMove <- int(e.X * c4.MaxColumns / SCREEN_WIDTH)
+
+					// Tell user that the AI is thinking now
+					line1 =
+						sdl.CreateRGBSurface(0, 0, 0, 32, 0, 0, 0, 0)
+					line2 =
+						ttf.RenderText_Blended(font,
+							"Thinking...",
+							sdl.Color{255, 255, 255, 0})
+					showMessage = true
 				} else if gameOver &&
 					e.Type == sdl.MOUSEBUTTONUP &&
 					e.Button == sdl.BUTTON_LEFT {
 					gameOver = false
+					showMessage = false
 					go startGame()
 				}
 			case sdl.QuitEvent:
@@ -195,6 +201,7 @@ loop:
 
 		case <-moveReady:
 			waitingForMove = true
+			showMessage = false
 
 		case winner = <-gameResults:
 			gameOver = true
@@ -215,6 +222,8 @@ loop:
 				ttf.RenderText_Blended(font,
 					"Click to play again...",
 					sdl.Color{255, 255, 255, 0})
+
+			showMessage = true
 		}
 
 	}
