@@ -9,6 +9,8 @@ As such, there are 3 programs that can be built:
 * Graphical game in the `sdl-game` directory
 * Text-based game in the `text-game` directory
 
+Binaries are in the Downloads tab above.
+
 Dependencies
 ------------
 
