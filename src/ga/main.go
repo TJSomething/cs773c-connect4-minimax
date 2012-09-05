@@ -1,15 +1,15 @@
 package main
 
 import (
+	"../c4"
+	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
+	"os"
 	"runtime"
 	"sort"
-	"os"
-	"log"
-	"encoding/json"
-	"../c4"
 	"time"
 )
 
@@ -42,8 +42,8 @@ func main() {
 			if err := decoder.Decode(&pop); err != nil {
 				log.Println(err)
 				log.Println("Writing new file")
-			
-}		}
+			}
+		}
 	}
 	// Otherwise, generate one randomly. This also fills up empty space
 	// in undersized populations that have been loaded
@@ -51,7 +51,7 @@ func main() {
 		for j := 0; j < 6; j++ {
 			tempGenome[j] = 2*rand.Float64() - 1
 		}
-		pop = append(pop, tempGenome)	
+		pop = append(pop, tempGenome)
 	}
 	var genomeOrder []int
 	// Function/closures for each game
@@ -97,10 +97,11 @@ func main() {
 				f2 = c4.EvalFactors{pop[g2][0], pop[g2][1], pop[g2][2],
 					pop[g2][3], pop[g2][4], pop[g2][5]}
 				fmt.Printf(
-					"Battle %v-%v:\n\t%v (%v/%v)\n\tvs\n\t%v (%v/%v)\n\n", 
-					generation, battle+1,
-					f1, wins[g1], battle,
-					f2, wins[g2], battle)
+					"\nGeneration %v, round %v/%v, genome %v/%v:\n\t"+
+						"%v (%v/%v)\n\tvs\n\t%v (%v/%v)\n",
+					generation, battle+1, BattleCount, g1+1, PopSize,
+					f1, wins[g1], battle*2,
+					f2, wins[g2], battle*2)
 				// Run a game with the competitors
 				c4.RunGame(
 					c4.AlphaBetaAI{
@@ -135,7 +136,7 @@ func main() {
 		acc = 0
 		bestFitness = math.Inf(-1)
 		for i, _ := range wins {
-			tempFitness = float64(wins[i])/float64(BattleCount)
+			tempFitness = float64(wins[i]) / float64(BattleCount)
 			// The actual numbers we use will be consist of weighted ranges
 			// picked randomly, which we can speed up using a binary search
 			fitness[i] = acc
@@ -192,7 +193,8 @@ func main() {
 		// Write the latest generation to a file
 		if len(os.Args) == 2 {
 			if file, err := os.Create(os.Args[1]); err == nil {
-				enc := json.NewEncoder(file)	
+				enc := json.NewEncoder(file)
+				enc.Encode(&pop)
 				enc.Encode(&generation)
 				enc.Encode(&bestGenome)
 				enc.Encode(&bestFitness)
