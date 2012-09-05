@@ -437,7 +437,7 @@ func (f evalFactors) Eval(game State, p Piece) float64 {
 }
 
 const PopSize = 100
-const BattleCount = 500
+const BattleCount = 5
 const mutationStdDev = 0.03
 
 func main() {
@@ -447,7 +447,6 @@ func main() {
 	pop := make([][6]float64, PopSize)
 	var newPop [][6]float64
 	var wins [PopSize]int
-	var plays [PopSize]int
 	var fitness [PopSize + 1]float64
 	for i, genome := range pop {
 		for j, _ := range genome {
@@ -455,6 +454,7 @@ func main() {
 		}
 	}
 	generation := 0
+	var genomeOrder []int
 	// Function/closures for each game
 	isDone := func(game State) bool {
 		return game.IsDone()
@@ -476,9 +476,6 @@ func main() {
 		winnerChan <- winner
 	}
 	// Fitness temps
-	z := 1.0 // Using 85% confidence, z=1.6 is 95%
-	var pHat float64
-	var n float64
 	var acc float64
 	var tempFitness float64
 	var bestFitness float64
@@ -491,64 +488,54 @@ func main() {
 	for {
 		// Determine fitness
 		for battle := 0; battle < BattleCount; battle++ {
-			// Get competitors
-			g1 = rand.Intn(PopSize)
-			g2 = rand.Intn(PopSize)
-			f1 = evalFactors{pop[g1][0], pop[g1][1], pop[g1][2],
-				pop[g1][0], pop[g1][1], pop[g1][2]}
-			f2 = evalFactors{pop[g2][0], pop[g2][1], pop[g2][2],
-				pop[g2][0], pop[g2][1], pop[g2][2]}
-			fmt.Printf("Battle %v-%v:\n\t%v (%v/%v)\n\tvs\n\t%v (%v/%v)\n\n", 
-				generation, battle+1,
-				f1, wins[g1], plays[g1],
-				f2, wins[g2], plays[g2])
-			// Run a game with the competitors
-			RunGame(
-				AlphaBetaAI{
-					Red,
-					8,
-					func(game State, p Piece) float64 {
-						return f1.Eval(game, p)
+			// Initialize a permutation of competitors
+			genomeOrder = rand.Perm(PopSize)
+			for g1 = 0; g1 < PopSize; g1++ {
+				g2 = genomeOrder[g1]
+				f1 = evalFactors{pop[g1][0], pop[g1][1], pop[g1][2],
+					pop[g1][0], pop[g1][1], pop[g1][2]}
+				f2 = evalFactors{pop[g2][0], pop[g2][1], pop[g2][2],
+					pop[g2][0], pop[g2][1], pop[g2][2]}
+				fmt.Printf(
+					"Battle %v-%v:\n\t%v (%v/%v)\n\tvs\n\t%v (%v/%v)\n\n", 
+					generation, battle+1,
+					f1, wins[g1], battle,
+					f2, wins[g2], battle)
+				// Run a game with the competitors
+				RunGame(
+					AlphaBetaAI{
+						Red,
+						8,
+						func(game State, p Piece) float64 {
+							return f1.Eval(game, p)
+						},
+						isDone,
 					},
-					isDone,
-				},
-				AlphaBetaAI{
-					Black,
-					8,
-					func(game State, p Piece) float64 {
-						return f2.Eval(game, p)
+					AlphaBetaAI{
+						Black,
+						8,
+						func(game State, p Piece) float64 {
+							return f2.Eval(game, p)
+						},
+						isDone,
 					},
-					isDone,
-				},
-				displayNoBoard,
-				showError,
-				notifyWinner)
-			// Update win counts
-			if winner = <-winnerChan; winner == Red {
-				wins[g1]++
-			} else if winner == Black {
-				wins[g2]++
+					displayNoBoard,
+					showError,
+					notifyWinner)
+				// Update win counts
+				if winner = <-winnerChan; winner == Red {
+					wins[g1]++
+				} else if winner == Black {
+					wins[g2]++
+				}
 			}
-			plays[g1]++
-			plays[g2]++
 		}
+
 		// Calculate win/game ratios
 		acc = 0
 		bestFitness = math.Inf(-1)
 		for i, _ := range wins {
-			if plays[i] > 0 {
-				// This uses the Wilson confidence interval, taken from
-				// Reddit's comment algorithm, in order to consider confidence
-				// caused by more samples
-				pHat = float64(wins[i]) / float64(plays[i])
-				n = float64(plays[i])
-				tempFitness =
-					math.Sqrt(pHat+z*z/(2*n)-z*((pHat*(1-pHat)+z*z/(4*n))/n)) /
-						(1 + z*z/n)
-			} else {
-				// By default, all genomes have a 50% success ratio
-				tempFitness = 0.5
-			}
+			tempFitness = float64(wins[i])/float64(BattleCount)
 			// The actual numbers we use will be consist of weighted ranges
 			// picked randomly, which we can speed up using a binary search
 			fitness[i] = acc
@@ -608,5 +595,10 @@ func main() {
 		fmt.Println("Fitness:     ", bestFitness)
 		fmt.Println()
 		generation++
+
+		// Clear the variables
+		for i := 0; i < PopSize; i++ {
+			wins[i] = 0
+		}
 	}
 }
