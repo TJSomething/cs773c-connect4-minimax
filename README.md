@@ -9,6 +9,12 @@ As such, there are 3 programs that can be built:
 * Graphical game in the `sdl-game` directory
 * Text-based game in the `text-game` directory
 
+Dependencies
+------------
+
+All programs require [Go](http://golang.org) to compile.
+`sdl-game` also requires [Go-SDL](https://github.com/0xe2-0x9a-0x9b/Go-SDL/).
+
 Build
 -----
 
