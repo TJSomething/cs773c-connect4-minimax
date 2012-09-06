@@ -67,7 +67,8 @@ Static Evaluator
 ----------------
 
 The static evaluator function is essentially copied from Jenny Lam's report
-"Heuristics in the game of Connect-K." However, some slight changes were made.
+"[Heuristics in the game of Connect-K](http://www.ics.uci.edu/~jlam2/connectk.pdf)."
+However, some slight changes were made.
 The resulting function is a linear combination of the following:
 
 1. `p_1` win: This is 1 when the AI is at a winning state, and 0 otherwise.
