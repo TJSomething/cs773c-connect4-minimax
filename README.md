@@ -110,7 +110,13 @@ The order of these correspond to the values in the list above.
 
 ### Strengths and weaknesses
 
-I cannot actually beat this static evaluator with these coefficients. It 
-frequently leads me into unwinnable situations. However, I will admit that
-I am terrible at Connect Four, as can be seen in 
+I cannot actually beat this static evaluator with these coefficients. 
+However, I will admit that I am terrible at Connect Four, as can be seen in 
 [this video](http://youtu.be/0JSBRwHBv6Q).
+
+After further testing, an interesting preference was found. It will frequently
+ignore immediate wins in favor of setting up no win situations. This is not
+surprising given that setting up threats is a higher priority than winning.
+However, these setups do not always turn into wins. However, some method of
+supplying non-linear effects, as well as taking the depth of the evaluation
+into account to allow for uncertainty seems like a good idea.
