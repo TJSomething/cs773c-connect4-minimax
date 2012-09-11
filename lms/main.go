@@ -14,9 +14,8 @@ import (
 	"time"
 )
 
-const PopSize = 10
-const BattleCount = 1
-const mu = 0.000001
+const PopSize = 3
+const mu = 0.00001
 
 // An evaluator that keeps track of all evaluated game states and learns from
 // them
@@ -150,7 +149,7 @@ func main() {
 	// Initialize variables
 	evalFuncs := make([]lmsEvaluator, 0, PopSize)
 	var wins [PopSize]int
-	var generation int
+	var iteration int
 	var tempCoeffs [6]float64
 	// We need these to find the best player
 	var leastError float64
@@ -170,6 +169,10 @@ func main() {
 			if err := decoder.Decode(&evalFuncs); err != nil {
 				log.Println(err)
 				log.Println("Writing new file")
+			} else if err := decoder.Decode(&iteration); err != nil {
+				// We also want the the iteration number loaded
+				log.Println(err)
+				log.Println("Iteration number missing")
 			}
 		}
 	}
@@ -181,7 +184,6 @@ func main() {
 		}
 		evalFuncs = append(evalFuncs, newEvaluator(tempCoeffs))
 	}
-	var genomeOrder []int
 
 	// Function/closures for each game
 	isDone := func(game c4.State) bool {
@@ -205,16 +207,12 @@ func main() {
 	}
 
 	for {
-		// Sample the state space
-		for battle := 0; battle < BattleCount; battle++ {
-			// Initialize a permutation of competitors
-			genomeOrder = rand.Perm(PopSize)
-			for g1 = 0; g1 < PopSize; g1++ {
-				g2 = genomeOrder[g1]
+		for g1 = 0; g1 < PopSize; g1++ {
+			for g2 = 0; g2 < PopSize; g2++ {
 				fmt.Printf(
-					"\nGeneration %v, round %v/%v, genome %v/%v:\n\t"+
+					"\nIteration %v, coeffs %v/%v vs coeffs %v/%v:\n\t"+
 						"%v (%v wins)\n\tvs\n\t%v (%v wins)\n",
-					generation, battle+1, BattleCount, g1+1, PopSize,
+					iteration, g1+1, PopSize, g2+1, PopSize,
 					evalFuncs[g1].Coeffs, wins[g1],
 					evalFuncs[g2].Coeffs, wins[g2])
 				// Run a game with the competitors
@@ -259,7 +257,7 @@ func main() {
 		for i := 0; i < PopSize; i++ {
 			// Learn and calculate the new error
 			averageError := evalFuncs[i].Learn()
-			// Keep the best coefficients of the generation
+			// Keep the best coefficients of the iteration
 			if leastError > averageError {
 				leastError = averageError
 				bestCoeffs = evalFuncs[i].Coeffs
@@ -271,23 +269,23 @@ func main() {
 			evalFuncs[i].Learn()
 		}
 
-		// Write the latest generation to a file
+		// Write the latest iteration to a file
 		if len(os.Args) == 2 {
 			if file, err := os.Create(os.Args[1]); err == nil {
 				enc := json.NewEncoder(file)
 				enc.Encode(&evalFuncs)
-				enc.Encode(&generation)
+				enc.Encode(&iteration)
 				enc.Encode(&bestCoeffs)
 				enc.Encode(&leastError)
 			}
 		}
 
 		// Show the best fitness
-		fmt.Println("Generation:  ", generation)
+		fmt.Println("Iteration:   ", iteration)
 		fmt.Println("Best coeffs: ", bestCoeffs)
 		fmt.Println("Error:       ", leastError)
 		fmt.Println()
-		generation++
+		iteration++
 
 		// Clear the variables
 		for i := 0; i < PopSize; i++ {
