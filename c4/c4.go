@@ -327,7 +327,7 @@ type EvalFactors struct {
 }
 
 // Detects threats caused by p moving to (col, row)
-func countThreats(game State, p Piece, col, row int) int {
+func CountThreats(game State, p Piece, col, row int) int {
 	// Empty spots don't cause threats
 	if game.GetPiece(col, row) != None {
 		return 0
@@ -369,16 +369,16 @@ func (f EvalFactors) Eval(game State, p Piece) float64 {
 	// Odd threats
 	for row := 0; row < MaxRows; row += 2 {
 		for col := 0; col < MaxColumns; col++ {
-			myOddThreats += float64(countThreats(game, p, col, row))
-			theirOddThreats += float64(countThreats(game, p.Other(), col, row))
+			myOddThreats += float64(CountThreats(game, p, col, row))
+			theirOddThreats += float64(CountThreats(game, p.Other(), col, row))
 		}
 	}
 	// Even threats
 	var myEvenThreats, theirEvenThreats float64
 	for row := 1; row < MaxRows; row += 2 {
 		for col := 0; col < MaxColumns; col++ {
-			myEvenThreats += float64(countThreats(game, p, col, row))
-			theirEvenThreats += float64(countThreats(game, p.Other(), col, row))
+			myEvenThreats += float64(CountThreats(game, p, col, row))
+			theirEvenThreats += float64(CountThreats(game, p.Other(), col, row))
 		}
 	}
 	return f.Win*win +

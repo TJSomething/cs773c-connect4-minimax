@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"runtime"
@@ -14,8 +15,8 @@ import (
 )
 
 const PopSize = 10
-const BattleCount = 5
-const mu = 0.1
+const BattleCount = 1
+const mu = 0.000001
 
 // An evaluator that keeps track of all evaluated game states and learns from
 // them
@@ -99,7 +100,7 @@ func (me *lmsEvaluator) EndGame(score float64) {
 	me.featuresMutex.Unlock()
 }
 
-func (me *lmsEvaluator) Learn() {
+func (me *lmsEvaluator) Learn() float64 {
 	// Make there are as many features as there are scores
 	if len(me.featuresList) != len(me.actualScores) {
 		panic(errors.New("There are fewer scores than features."))
@@ -121,9 +122,23 @@ func (me *lmsEvaluator) Learn() {
 		}
 	}
 
+	// Find the coefficients that give the least error
+	var averageError float64
+	for i := 0; i < len(me.actualScores); i++ {
+		approxScore = 0
+		for j := 0; j < 6; j++ {
+			approxScore += me.featuresList[i][j] * me.Coeffs[j]
+		}
+
+		averageError += math.Abs(approxScore - me.actualScores[i])
+	}
+	averageError /= float64(len(me.actualScores))
+
 	// Clear the scores and features
-	me.featuresList = make([][6]float64, 0, len(me.featuresList))
-	me.actualScores = make([]float64, 0, len(me.actualScores))
+	me.featuresList = make([][6]float64, 0, cap(me.featuresList))
+	me.actualScores = make([]float64, 0, cap(me.actualScores))
+
+	return averageError
 }
 
 func main() {
@@ -138,7 +153,7 @@ func main() {
 	var generation int
 	var tempCoeffs [6]float64
 	// We need these to find the best player
-	var mostWins int
+	var leastError float64
 	var bestCoeffs [6]float64
 	// Temps
 	var g1, g2 int
@@ -232,16 +247,21 @@ func main() {
 					evalFuncs[g1].EndGame(-1)
 					evalFuncs[g2].EndGame(+1)
 					wins[g2]++
+				} else {
+					evalFuncs[g1].EndGame(0)
+					evalFuncs[g2].EndGame(0)
 				}
 			}
 		}
 
-		// Find the best evaluator
-		mostWins = -1
-		for i, score := range wins {
-			// Keep the best genome of the generation
-			if score > mostWins {
-				mostWins = score
+		// Run learning and find the new best evaluator
+		leastError = math.Inf(1)
+		for i := 0; i < PopSize; i++ {
+			// Learn and calculate the new error
+			averageError := evalFuncs[i].Learn()
+			// Keep the best coefficients of the generation
+			if leastError > averageError {
+				leastError = averageError
 				bestCoeffs = evalFuncs[i].Coeffs
 			}
 		}
@@ -258,14 +278,14 @@ func main() {
 				enc.Encode(&evalFuncs)
 				enc.Encode(&generation)
 				enc.Encode(&bestCoeffs)
-				enc.Encode(&mostWins)
+				enc.Encode(&leastError)
 			}
 		}
 
 		// Show the best fitness
 		fmt.Println("Generation:  ", generation)
 		fmt.Println("Best coeffs: ", bestCoeffs)
-		fmt.Println("# of wins:   ", mostWins)
+		fmt.Println("Error:       ", leastError)
 		fmt.Println()
 		generation++
 

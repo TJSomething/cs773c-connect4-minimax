@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"time"
+	_ "net/http/pprof"
 )
 
 const PopSize = 100
