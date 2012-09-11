@@ -3,7 +3,6 @@ package main
 import (
 	"../c4"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -22,9 +21,11 @@ const mu = 0.00001
 type lmsEvaluator struct {
 	Coeffs         [6]float64
 	featuresList   [][6]float64
-	actualScores   []float64
+	boardList      []c4.State
+	scoreMemo      map[c4.State]float64
 	featuresMutex  sync.Mutex
 	featuresSynced sync.WaitGroup
+	side           c4.Piece
 }
 
 // Makes a new evaluator
@@ -32,12 +33,17 @@ func newEvaluator(coeffs [6]float64) lmsEvaluator {
 	var result lmsEvaluator
 	result.Coeffs = [6]float64{coeffs[0], coeffs[1], coeffs[2],
 		coeffs[3], coeffs[4], coeffs[5]}
+	result.scoreMemo = make(map[c4.State]float64)
+	result.side = c4.None
 	return result
 }
 
 // Evaluates the game state
 func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 	var features [6]float64
+	if me.side != p {
+		me.side = p
+	}
 
 	// Calculate the features of the game state
 	// Winning factor
@@ -67,77 +73,77 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 		}
 	}
 
-	// Send a goroutine to add stuff to the features vector, so
-	// synchronization doesn't slow us down.
-	go func() {
-		me.featuresSynced.Add(1)
-		me.featuresMutex.Lock()
-		me.featuresList = append(me.featuresList, features)
-		me.featuresMutex.Unlock()
-		me.featuresSynced.Done()
-	}()
-
 	// Add up the results
 	var result float64
 	for i := 0; i < 6; i++ {
 		result += features[i] + me.Coeffs[i]
 	}
 
+	// Send a goroutine to add stuff to the features vector, so
+	// synchronization doesn't slow us down.
+	go func() {
+		me.featuresSynced.Add(1)
+		me.featuresMutex.Lock()
+		me.featuresList = append(me.featuresList, features)
+		me.boardList = append(me.boardList, game)
+		me.scoreMemo[game] = result
+		me.featuresMutex.Unlock()
+		me.featuresSynced.Done()
+	}()
+
 	return result
 }
 
-func (me *lmsEvaluator) EndGame(score float64) {
-	// Wait for writes to the features list to end
-	me.featuresSynced.Wait()
-	me.featuresMutex.Lock() // This shouldn't actually be necessary.
-
-	// Keep track of the actual scores, along side the feature vectors
-	for len(me.actualScores) < len(me.featuresList) {
-		me.actualScores = append(me.actualScores, score)
-	}
-
-	me.featuresMutex.Unlock()
-}
-
-func (me *lmsEvaluator) Learn() float64 {
-	// Make there are as many features as there are scores
-	if len(me.featuresList) != len(me.actualScores) {
-		panic(errors.New("There are fewer scores than features."))
-	}
-
+func (me *lmsEvaluator) Learn() {
 	var approxScore float64
-	for i := 0; i < len(me.actualScores); i++ {
-		// Use the latest weights to approximate the score
-		approxScore = 0
-		for j := 0; j < 6; j++ {
-			approxScore += me.featuresList[i][j] * me.Coeffs[j]
+	var successorExists bool
+	var bestScore float64
+	var board c4.State
+	var count int
+	for i := 0; i < len(me.featuresList); i++ {
+		// Check if we have a successor to use for training
+		successorExists = true
+		board = me.boardList[i]
+		if board.GetTurn() == me.side {
+			bestScore = math.Inf(-1)
+		} else {
+			bestScore = math.Inf(+1)
+		}
+
+		for col := 0; col < c4.MaxColumns; col++ {
+			if nextBoard, err := board.AfterMove(board.GetTurn(), col); err == nil {
+				if nextScore, ok := me.scoreMemo[nextBoard]; ok {
+					if board.GetTurn() == me.side {
+						if nextScore > bestScore {
+							bestScore = nextScore
+						}
+					} else {
+						if nextScore < bestScore {
+							bestScore = nextScore
+						}
+					}
+				} else {
+					successorExists = false
+				}
+			}
 		}
 
 		// Update the weight using the error for the feature
-		for j := 0; j < 6; j++ {
-			me.Coeffs[j] +=
-				mu * (me.actualScores[i] - approxScore) *
-					me.featuresList[i][j]
+		if successorExists {
+			for j := 0; j < 6; j++ {
+				me.Coeffs[j] +=
+					mu * (bestScore - approxScore) *
+						me.featuresList[i][j]
+			}
+			count++
 		}
 	}
-
-	// Find the coefficients that give the least error
-	var averageError float64
-	for i := 0; i < len(me.actualScores); i++ {
-		approxScore = 0
-		for j := 0; j < 6; j++ {
-			approxScore += me.featuresList[i][j] * me.Coeffs[j]
-		}
-
-		averageError += math.Abs(approxScore - me.actualScores[i])
-	}
-	averageError /= float64(len(me.actualScores))
 
 	// Clear the scores and features
 	me.featuresList = make([][6]float64, 0, cap(me.featuresList))
-	me.actualScores = make([]float64, 0, cap(me.actualScores))
-
-	return averageError
+	me.boardList = make([]c4.State, 0, cap(me.boardList))
+	me.scoreMemo = make(map[c4.State]float64)
+	fmt.Println(count)
 }
 
 func main() {
@@ -194,7 +200,7 @@ func main() {
 		fmt.Println(err)
 	}
 	winnerChan := make(chan c4.Piece, 1)
-	var winner c4.Piece
+
 	notifyWinner := func(winner c4.Piece) {
 		if winner == c4.Red {
 			fmt.Println("Red wins!")
@@ -237,31 +243,24 @@ func main() {
 					showError,
 					notifyWinner)
 				// Update win counts
-				if winner = <-winnerChan; winner == c4.Red {
-					evalFuncs[g1].EndGame(+1)
-					evalFuncs[g2].EndGame(-1)
+				if winner := <-winnerChan; winner == c4.Red {
 					wins[g1]++
 				} else if winner == c4.Black {
-					evalFuncs[g1].EndGame(-1)
-					evalFuncs[g2].EndGame(+1)
 					wins[g2]++
-				} else {
-					evalFuncs[g1].EndGame(0)
-					evalFuncs[g2].EndGame(0)
 				}
 			}
 		}
 
-		// Run learning and find the new best evaluator
-		leastError = math.Inf(1)
+		// Find the new best evaluator and run learning
+		mostWins := -1
 		for i := 0; i < PopSize; i++ {
-			// Learn and calculate the new error
-			averageError := evalFuncs[i].Learn()
 			// Keep the best coefficients of the iteration
-			if leastError > averageError {
-				leastError = averageError
+			if mostWins < wins[i] {
+				mostWins = wins[i]
 				bestCoeffs = evalFuncs[i].Coeffs
 			}
+			// Learn
+			evalFuncs[i].Learn()
 		}
 
 		// Learn from the experience
