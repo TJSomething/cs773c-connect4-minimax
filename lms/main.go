@@ -75,8 +75,14 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 
 	// Add up the results
 	var result float64
-	for i := 0; i < 6; i++ {
-		result += features[i] + me.Coeffs[i]
+	if features[0] > 0 {
+		result = 1
+	} else if features[1] > 0 {
+		result = -1
+	} else {
+		for i := 0; i < 6; i++ {
+			result += features[i] + me.Coeffs[i]
+		}
 	}
 
 	// Send a goroutine to add stuff to the features vector, so
