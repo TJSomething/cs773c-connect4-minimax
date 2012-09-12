@@ -14,20 +14,16 @@ import (
 )
 
 const PopSize = 3
-const mu = 0.001
+const mu = 0.00001
 
 type board [c4.MaxColumns][c4.MaxRows]c4.Piece
 
 // An evaluator that keeps track of all evaluated game states and learns from
 // them
 type lmsEvaluator struct {
-	Coeffs         [6]float64
-	featuresList   [][6]float64
-	stateList      []c4.State
-	scoreMemo      map[board]float64
-	featuresMutex  sync.Mutex
-	featuresSynced sync.WaitGroup
-	side           c4.Piece
+	Coeffs      [6]float64
+	coeffsMutex sync.RWMutex
+	count       int
 }
 
 // Makes a new evaluator
@@ -35,167 +31,93 @@ func newEvaluator(coeffs [6]float64) lmsEvaluator {
 	var result lmsEvaluator
 	result.Coeffs = [6]float64{coeffs[0], coeffs[1], coeffs[2],
 		coeffs[3], coeffs[4], coeffs[5]}
-	result.Init()
 	return result
-}
-
-func (this *lmsEvaluator) Init() {
-	// Pre-allocate a crap ton of memory
-	this.featuresList = make([][6]float64, 0, (2+PopSize*PopSize)*350000)
-	this.stateList = make([]c4.State, 0, (2+PopSize*PopSize)*350000)
-	this.scoreMemo = make(map[board]float64)
-	this.side = c4.None
 }
 
 // Evaluates the game state
 func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
-	var features [6]float64
-	if me.side != p {
-		me.side = p
-	}
-
-	// Calculate the features of the game state
-	// Winning factor
-	winner := game.GetWinner()
-	if winner == p {
-		features[0] = 1
-		features[1] = 0
-	} else if winner == c4.None {
-		features[0] = 0
-		features[1] = 0
-	} else {
-		features[0] = 0
-		features[1] = 1
-	}
-	// Odd threats
-	for row := 0; row < c4.MaxRows; row += 2 {
-		for col := 0; col < c4.MaxColumns; col++ {
-			features[2] += float64(c4.CountThreats(game, p, col, row))
-			features[3] += float64(c4.CountThreats(game, p.Other(), col, row))
-		}
-	}
-	// Even threats
-	for row := 1; row < c4.MaxRows; row += 2 {
-		for col := 0; col < c4.MaxColumns; col++ {
-			features[4] += float64(c4.CountThreats(game, p, col, row))
-			features[5] += float64(c4.CountThreats(game, p.Other(), col, row))
-		}
-	}
-
-	// Add up the results
-	var result float64
-	if features[0] > 0 {
-		result = 1
-	} else if features[1] > 0 {
-		result = -1
-	} else {
-		for i := 0; i < 6; i++ {
-			result += features[i] + me.Coeffs[i]
-		}
-	}
-
-	//go func(me *lmsEvaluator, features [6]float64,
-	//	game c4.State) {
-	me.featuresSynced.Add(1)
-	me.featuresMutex.Lock()
-	me.featuresList = append(me.featuresList, features)
-	me.stateList = append(me.stateList, game)
-	// if len(me.stateList)%100000 == 0 {
-	// 	fmt.Println("Length", len(me.stateList))
-	// }
-	me.scoreMemo[game.GetBoard()] = result
-	me.featuresMutex.Unlock()
-	me.featuresSynced.Done()
-	//}(me, features, game)
-
-	return result
-}
-
-func (me *lmsEvaluator) Learn() {
-	var approxScore float64
-	var successorExists bool
 	var bestScore float64
-	var currentState c4.State
-	var count int
 
-	me.featuresSynced.Wait()
+	// Copy out the coefficients to reduce lock contention
+	me.coeffsMutex.RLock()
+	myCoeffs := me.Coeffs
+	me.coeffsMutex.RUnlock()
 
-	for i := 0; i < len(me.featuresList); i++ {
-		// Check if we have a successor to use for training
-		successorExists = true
-		currentState = me.stateList[i]
-		if currentState.GetTurn() == me.side {
-			bestScore = math.Inf(-1)
-		} else {
-			bestScore = math.Inf(+1)
-		}
+	// Estimate the game state's utility
+	approxScore, currentFeatures := BetterEval(myCoeffs, game, p)
 
-		for col := 0; col < c4.MaxColumns; col++ {
-			if nextBoard, err := currentState.AfterMove(currentState.GetTurn(),
-				col); err == nil {
-				var nextScore float64
-				nextScore, ok := me.scoreMemo[nextBoard.GetBoard()]
-				if !ok && nextBoard.IsDone() {
-					if nextBoard.GetWinner() == me.side {
-						nextScore = 1
-					} else if nextBoard.GetWinner() == me.side.Other() {
-						nextScore = -1
-					} else {
-						nextScore = 0
-					}
-					ok = true
+	// Try to get a better estimate of the utility by looking one move ahead
+	// with proven weights
+	if game.GetTurn() != p {
+		bestScore = math.Inf(-1)
+	} else {
+		bestScore = math.Inf(+1)
+	}
+
+	for col := 0; col < c4.MaxColumns; col++ {
+		if nextBoard, err := game.AfterMove(game.GetTurn(),
+			col); err == nil {
+			nextScore, _ := BetterEval(
+				[6]float64{
+					0.2502943943301069,
+					-0.4952316649483701,
+					0.3932539700819625,
+					-0.2742452616759889,
+					0.4746881137884282,
+					0.2091091127191147},
+				nextBoard,
+				nextBoard.GetTurn())
+
+			if game.GetTurn() != p {
+				if nextScore > bestScore {
+					bestScore = nextScore
 				}
-
-				if ok {
-					if currentState.GetTurn() == me.side {
-						if nextScore > bestScore {
-							bestScore = nextScore
-						}
-					} else {
-						if nextScore < bestScore {
-							bestScore = nextScore
-						}
-					}
-				} else {
-					successorExists = false
+			} else {
+				if nextScore < bestScore {
+					bestScore = nextScore
 				}
 			}
 		}
+	}
+	// Use the evolved weights as a reference to prevent divergence
+	// knownScore, _ = BetterEval([6]float64{
+	// 	0.2502943943301069,
+	// 	-0.4952316649483701,
+	// 	0.3932539700819625,
+	// 	-0.2742452616759889,
+	// 	0.4746881137884282,
+	// 	0.2091091127191147}, game, p)
 
-		// Use the latest weights to approximate the score
-		approxScore = 0
-		for j := 0; j < 6; j++ {
-			approxScore += me.featuresList[i][j] * me.Coeffs[j]
-		}
-
-		// Update the weight using the error for the feature
-		if successorExists && !math.IsInf(bestScore, 0) {
+	// Change the coefficients according to the error
+	me.count++
+	if me.count%100000 == 0 {
+		fmt.Println(me.count)
+		fmt.Println(me.Coeffs)
+	}
+	// if !math.IsInf(bestScore, 0) {
+	// 	for j := 0; j < 6; j++ {
+	// 		me.Coeffs[j] +=
+	// 			mu * (bestScore - approxScore) * currentFeatures[j]
+	// 	}
+	// }
+	go func() {
+		if !math.IsInf(bestScore, 0) {
+			me.coeffsMutex.Lock()
 			for j := 0; j < 6; j++ {
 				me.Coeffs[j] +=
-					mu * (bestScore - approxScore) *
-						me.featuresList[i][j]
+					mu * (bestScore - approxScore) * currentFeatures[j]
 			}
-			count++
+			me.coeffsMutex.Unlock()
 		}
-	}
+	}()
 
-	// Clear the scores and features
-	me.featuresList = me.featuresList[0:0]
-	me.stateList = me.stateList[0:0]
-	me.scoreMemo = make(map[board]float64)
+	return approxScore
 }
 
-func BetterEval(f c4.EvalFactors, game c4.State, p c4.Piece) float64 {
+func BetterEval(coeffs [6]float64, game c4.State, p c4.Piece) (result float64,
+	features [6]float64) {
 	// Winning factor
 	var win, lose float64
-	winner := game.GetWinner()
-	if winner == p {
-		return 1
-	} else if winner == p.Other() {
-		return -1
-	} else if game.IsDone() && winner == c4.None {
-		return 0
-	}
 	var myOddThreats, theirOddThreats float64
 	// Odd threats
 	for row := 0; row < c4.MaxRows; row += 2 {
@@ -212,12 +134,26 @@ func BetterEval(f c4.EvalFactors, game c4.State, p c4.Piece) float64 {
 			theirEvenThreats += float64(c4.CountThreats(game, p.Other(), col, row))
 		}
 	}
-	return f.Win*win +
-		f.Lose*lose +
-		f.MyEven*myEvenThreats +
-		f.TheirEven*theirEvenThreats +
-		f.MyOdd*myOddThreats +
-		f.TheirOdd*theirOddThreats
+	winner := game.GetWinner()
+	if winner == p {
+		result = 1
+	} else if winner == p.Other() {
+		result = -1
+	} else if game.IsDone() && winner == c4.None {
+		result = 0
+	} else {
+		result = coeffs[0]*win +
+			coeffs[1]*lose +
+			coeffs[2]*myEvenThreats +
+			coeffs[3]*theirEvenThreats +
+			coeffs[4]*myOddThreats +
+			coeffs[5]*theirOddThreats
+	}
+
+	features = [6]float64{win, lose, myEvenThreats, theirEvenThreats,
+		myOddThreats, theirOddThreats}
+
+	return
 }
 
 func main() {
@@ -256,12 +192,6 @@ func main() {
 		}
 	}
 
-	// If we've got evalFuncs loaded, then we need to initialize the private
-	// fields
-	for i, _ := range evalFuncs {
-		evalFuncs[i].Init()
-	}
-
 	// Otherwise, generate them randomly. This also fills up empty space
 	// if not enough load
 	for i := len(evalFuncs); i < PopSize; i++ {
@@ -297,13 +227,14 @@ func main() {
 		c4.Red,
 		8,
 		func(game c4.State, p c4.Piece) float64 {
-			return BetterEval(c4.EvalFactors{
+			result, _ := BetterEval([6]float64{
 				0.2502943943301069,
 				-0.4952316649483701,
 				0.3932539700819625,
 				-0.2742452616759889,
 				0.4746881137884282,
 				0.2091091127191147}, game, p)
+			return result
 		},
 		func(game c4.State) bool {
 			return game.GetWinner() != c4.None
@@ -408,13 +339,6 @@ func main() {
 				mostWins = wins[i]
 				bestCoeffs = evalFuncs[i].Coeffs
 			}
-			// Learn
-			evalFuncs[i].Learn()
-		}
-
-		// Learn from the experience
-		for i := 0; i < PopSize; i++ {
-			evalFuncs[i].Learn()
 		}
 
 		// Write the latest iteration to a file

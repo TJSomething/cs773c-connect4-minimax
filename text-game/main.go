@@ -56,9 +56,10 @@ func main() {
 	// Use all processors
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	c4.RunGame(
-		TextHuman{},
+		//TextHuman{},
+
 		c4.AlphaBetaAI{
-			c4.Black,
+			c4.Red,
 			8,
 			func(game c4.State, p c4.Piece) float64 {
 				return c4.EvalFactors{
@@ -68,6 +69,17 @@ func main() {
 					-0.2742452616759889,
 					0.4746881137884282,
 					0.2091091127191147}.Eval(game, p)
+			},
+			func(game c4.State) bool {
+				return game.GetWinner() != c4.None
+			},
+		},
+		c4.AlphaBetaAI{
+			c4.Black,
+			8,
+			func(game c4.State, p c4.Piece) float64 {
+				return c4.EvalFactors{
+					-0.44025376981519854, -0.984130509442473, 3.1687077228958405, 3.1025578581098, 2.963961809218915, 3.321618870088799}.Eval(game, p)
 			},
 			func(game c4.State) bool {
 				return game.GetWinner() != c4.None
