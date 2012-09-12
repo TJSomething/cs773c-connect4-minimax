@@ -122,9 +122,9 @@ func main() {
 					// 		-0.2742452616759889,
 					// 		0.4746881137884282,
 					// 		0.2091091127191147}.Eval(game, p)
-					// Least mean squares solution after 8 iterations:
+					// Least mean squares solution after 2 iterations against evolved solution:
 					return c4.EvalFactors{
-						-0.9571905351459684, 0.5937887615514715, 1.5564004899922947e+10, 1.4372659948172928e+10, 1.4639162360474566e+10, 2.0461976265482983e+10}.Eval(game, p)
+						0.32386133725050104, 0.5490470895311659, 0.3932539698522742, -0.27424526114286796, 0.4746881136468789, 0.2091091126568151}.Eval(game, p)
 				},
 				func(game c4.State) bool {
 					return game.GetWinner() != c4.None

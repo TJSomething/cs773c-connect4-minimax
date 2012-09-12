@@ -36,7 +36,7 @@ func newEvaluator(coeffs [6]float64) lmsEvaluator {
 
 // Evaluates the game state
 func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
-	var bestScore float64
+	var bestScore, knownScore float64
 
 	// Copy out the coefficients to reduce lock contention
 	me.coeffsMutex.RLock()
@@ -58,13 +58,7 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 		if nextBoard, err := game.AfterMove(game.GetTurn(),
 			col); err == nil {
 			nextScore, _ := BetterEval(
-				[6]float64{
-					0.2502943943301069,
-					-0.4952316649483701,
-					0.3932539700819625,
-					-0.2742452616759889,
-					0.4746881137884282,
-					0.2091091127191147},
+				myCoeffs,
 				nextBoard,
 				nextBoard.GetTurn())
 
@@ -80,13 +74,13 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 		}
 	}
 	// Use the evolved weights as a reference to prevent divergence
-	// knownScore, _ = BetterEval([6]float64{
-	// 	0.2502943943301069,
-	// 	-0.4952316649483701,
-	// 	0.3932539700819625,
-	// 	-0.2742452616759889,
-	// 	0.4746881137884282,
-	// 	0.2091091127191147}, game, p)
+	knownScore, _ = BetterEval([6]float64{
+		0.2502943943301069,
+		-0.4952316649483701,
+		0.3932539700819625,
+		-0.2742452616759889,
+		0.4746881137884282,
+		0.2091091127191147}, game, p)
 
 	// Change the coefficients according to the error
 	me.count++
@@ -105,7 +99,7 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 			me.coeffsMutex.Lock()
 			for j := 0; j < 6; j++ {
 				me.Coeffs[j] +=
-					mu * (bestScore - approxScore) * currentFeatures[j]
+					mu * (knownScore - approxScore) * currentFeatures[j]
 			}
 			me.coeffsMutex.Unlock()
 		}
