@@ -14,7 +14,7 @@ import (
 )
 
 const PopSize = 3
-const mu = 0.00001
+const mu = 0.001
 
 type board [c4.MaxColumns][c4.MaxRows]c4.Piece
 
@@ -41,8 +41,8 @@ func newEvaluator(coeffs [6]float64) lmsEvaluator {
 
 func (this *lmsEvaluator) Init() {
 	// Pre-allocate a crap ton of memory
-	this.featuresList = make([][6]float64, 0, PopSize*PopSize*350000)
-	this.stateList = make([]c4.State, 0, PopSize*PopSize*350000)
+	this.featuresList = make([][6]float64, 0, (2+PopSize*PopSize)*350000)
+	this.stateList = make([]c4.State, 0, (2+PopSize*PopSize)*350000)
 	this.scoreMemo = make(map[board]float64)
 	this.side = c4.None
 }
@@ -84,8 +84,14 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 
 	// Add up the results
 	var result float64
-	for i := 0; i < 6; i++ {
-		result += features[i] * me.Coeffs[i]
+	if features[0] > 0 {
+		result = 1
+	} else if features[1] > 0 {
+		result = -1
+	} else {
+		for i := 0; i < 6; i++ {
+			result += features[i] + me.Coeffs[i]
+		}
 	}
 
 	//go func(me *lmsEvaluator, features [6]float64,
@@ -130,7 +136,13 @@ func (me *lmsEvaluator) Learn() {
 				var nextScore float64
 				nextScore, ok := me.scoreMemo[nextBoard.GetBoard()]
 				if !ok && nextBoard.IsDone() {
-					nextScore = me.scoreMemo[currentState.GetBoard()]
+					if nextBoard.GetWinner() == me.side {
+						nextScore = 1
+					} else if nextBoard.GetWinner() == me.side.Other() {
+						nextScore = -1
+					} else {
+						nextScore = 0
+					}
 					ok = true
 				}
 
@@ -171,8 +183,41 @@ func (me *lmsEvaluator) Learn() {
 	me.featuresList = me.featuresList[0:0]
 	me.stateList = me.stateList[0:0]
 	me.scoreMemo = make(map[board]float64)
+}
 
-	fmt.Println(count)
+func BetterEval(f c4.EvalFactors, game c4.State, p c4.Piece) float64 {
+	// Winning factor
+	var win, lose float64
+	winner := game.GetWinner()
+	if winner == p {
+		return 1
+	} else if winner == p.Other() {
+		return -1
+	} else if game.IsDone() && winner == c4.None {
+		return 0
+	}
+	var myOddThreats, theirOddThreats float64
+	// Odd threats
+	for row := 0; row < c4.MaxRows; row += 2 {
+		for col := 0; col < c4.MaxColumns; col++ {
+			myOddThreats += float64(c4.CountThreats(game, p, col, row))
+			theirOddThreats += float64(c4.CountThreats(game, p.Other(), col, row))
+		}
+	}
+	// Even threats
+	var myEvenThreats, theirEvenThreats float64
+	for row := 1; row < c4.MaxRows; row += 2 {
+		for col := 0; col < c4.MaxColumns; col++ {
+			myEvenThreats += float64(c4.CountThreats(game, p, col, row))
+			theirEvenThreats += float64(c4.CountThreats(game, p.Other(), col, row))
+		}
+	}
+	return f.Win*win +
+		f.Lose*lose +
+		f.MyEven*myEvenThreats +
+		f.TheirEven*theirEvenThreats +
+		f.MyOdd*myOddThreats +
+		f.TheirOdd*theirOddThreats
 }
 
 func main() {
@@ -187,7 +232,6 @@ func main() {
 	var iteration int
 	var tempCoeffs [6]float64
 	// We need these to find the best player
-	var leastError float64
 	var bestCoeffs [6]float64
 	// Temps
 	var g1, g2 int
@@ -248,6 +292,26 @@ func main() {
 		winnerChan <- winner
 	}
 
+	// Coefficients to keep the others honest
+	evolvedRed := c4.AlphaBetaAI{
+		c4.Red,
+		8,
+		func(game c4.State, p c4.Piece) float64 {
+			return BetterEval(c4.EvalFactors{
+				0.2502943943301069,
+				-0.4952316649483701,
+				0.3932539700819625,
+				-0.2742452616759889,
+				0.4746881137884282,
+				0.2091091127191147}, game, p)
+		},
+		func(game c4.State) bool {
+			return game.GetWinner() != c4.None
+		},
+	}
+	evolvedBlack := evolvedRed
+	evolvedBlack.Color = c4.Black
+
 	for {
 		for g1 = 0; g1 < PopSize; g1++ {
 			for g2 = 0; g2 < PopSize; g2++ {
@@ -298,6 +362,42 @@ func main() {
 					wins[g2]++
 				}
 			}
+			// Keep them honest by playing them against a proven
+			// set of coefficents
+			c4.RunGame(
+				evolvedRed,
+				c4.AlphaBetaAI{
+					c4.Black,
+					8,
+					func(game c4.State, p c4.Piece) float64 {
+						return evalFuncs[g1].Eval(game, p)
+					},
+					isDone,
+				},
+				displayNoBoard,
+				showError,
+				notifyWinner)
+			if winner := <-winnerChan; winner == c4.Black {
+				fmt.Printf("\nCoeffs %v beat the champion as black!", g1+1)
+				wins[g1]++
+			}
+			c4.RunGame(
+				c4.AlphaBetaAI{
+					c4.Red,
+					8,
+					func(game c4.State, p c4.Piece) float64 {
+						return evalFuncs[g1].Eval(game, p)
+					},
+					isDone,
+				},
+				evolvedBlack,
+				displayNoBoard,
+				showError,
+				notifyWinner)
+			if winner := <-winnerChan; winner == c4.Red {
+				fmt.Printf("\nCoeffs %v beat the champion as red!", g1+1)
+				wins[g1]++
+			}
 		}
 
 		// Find the new best evaluator and run learning
@@ -324,14 +424,14 @@ func main() {
 				enc.Encode(&evalFuncs)
 				enc.Encode(&iteration)
 				enc.Encode(&bestCoeffs)
-				enc.Encode(&leastError)
+				enc.Encode(&mostWins)
 			}
 		}
 
 		// Show the best fitness
 		fmt.Println("Iteration:   ", iteration)
 		fmt.Println("Best coeffs: ", bestCoeffs)
-		fmt.Println("Error:       ", leastError)
+		fmt.Println("Wins:        ", mostWins)
 		fmt.Println()
 		iteration++
 

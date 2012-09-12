@@ -97,6 +97,10 @@ func (this State) GetWinner() Piece {
 	return lineTest(this, this.lastMove, this.top[this.lastMove]-1)
 }
 
+func (this State) GetBoard() [MaxColumns][MaxRows]Piece {
+	return this.board
+}
+
 func (this State) IsDone() bool {
 	// Check for a winner
 	if this.GetWinner() != None {
