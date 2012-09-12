@@ -16,13 +16,15 @@ import (
 const PopSize = 3
 const mu = 0.00001
 
+type board [c4.MaxColumns][c4.MaxRows]c4.Piece
+
 // An evaluator that keeps track of all evaluated game states and learns from
 // them
 type lmsEvaluator struct {
 	Coeffs         [6]float64
 	featuresList   [][6]float64
-	boardList      []c4.State
-	scoreMemo      map[c4.State]float64
+	stateList      []c4.State
+	scoreMemo      map[board]float64
 	featuresMutex  sync.Mutex
 	featuresSynced sync.WaitGroup
 	side           c4.Piece
@@ -33,9 +35,16 @@ func newEvaluator(coeffs [6]float64) lmsEvaluator {
 	var result lmsEvaluator
 	result.Coeffs = [6]float64{coeffs[0], coeffs[1], coeffs[2],
 		coeffs[3], coeffs[4], coeffs[5]}
-	result.scoreMemo = make(map[c4.State]float64)
-	result.side = c4.None
+	result.Init()
 	return result
+}
+
+func (this *lmsEvaluator) Init() {
+	// Pre-allocate a crap ton of memory
+	this.featuresList = make([][6]float64, 0, PopSize*PopSize*350000)
+	this.stateList = make([]c4.State, 0, PopSize*PopSize*350000)
+	this.scoreMemo = make(map[board]float64)
+	this.side = c4.None
 }
 
 // Evaluates the game state
@@ -75,27 +84,23 @@ func (me *lmsEvaluator) Eval(game c4.State, p c4.Piece) float64 {
 
 	// Add up the results
 	var result float64
-	if features[0] > 0 {
-		result = 1
-	} else if features[1] > 0 {
-		result = -1
-	} else {
-		for i := 0; i < 6; i++ {
-			result += features[i] + me.Coeffs[i]
-		}
+	for i := 0; i < 6; i++ {
+		result += features[i] * me.Coeffs[i]
 	}
 
-	// Send a goroutine to add stuff to the features vector, so
-	// synchronization doesn't slow us down.
-	go func() {
-		me.featuresSynced.Add(1)
-		me.featuresMutex.Lock()
-		me.featuresList = append(me.featuresList, features)
-		me.boardList = append(me.boardList, game)
-		me.scoreMemo[game] = result
-		me.featuresMutex.Unlock()
-		me.featuresSynced.Done()
-	}()
+	//go func(me *lmsEvaluator, features [6]float64,
+	//	game c4.State) {
+	me.featuresSynced.Add(1)
+	me.featuresMutex.Lock()
+	me.featuresList = append(me.featuresList, features)
+	me.stateList = append(me.stateList, game)
+	// if len(me.stateList)%100000 == 0 {
+	// 	fmt.Println("Length", len(me.stateList))
+	// }
+	me.scoreMemo[game.GetBoard()] = result
+	me.featuresMutex.Unlock()
+	me.featuresSynced.Done()
+	//}(me, features, game)
 
 	return result
 }
@@ -104,22 +109,33 @@ func (me *lmsEvaluator) Learn() {
 	var approxScore float64
 	var successorExists bool
 	var bestScore float64
-	var board c4.State
+	var currentState c4.State
 	var count int
+
+	me.featuresSynced.Wait()
+
 	for i := 0; i < len(me.featuresList); i++ {
 		// Check if we have a successor to use for training
 		successorExists = true
-		board = me.boardList[i]
-		if board.GetTurn() == me.side {
+		currentState = me.stateList[i]
+		if currentState.GetTurn() == me.side {
 			bestScore = math.Inf(-1)
 		} else {
 			bestScore = math.Inf(+1)
 		}
 
 		for col := 0; col < c4.MaxColumns; col++ {
-			if nextBoard, err := board.AfterMove(board.GetTurn(), col); err == nil {
-				if nextScore, ok := me.scoreMemo[nextBoard]; ok {
-					if board.GetTurn() == me.side {
+			if nextBoard, err := currentState.AfterMove(currentState.GetTurn(),
+				col); err == nil {
+				var nextScore float64
+				nextScore, ok := me.scoreMemo[nextBoard.GetBoard()]
+				if !ok && nextBoard.IsDone() {
+					nextScore = me.scoreMemo[currentState.GetBoard()]
+					ok = true
+				}
+
+				if ok {
+					if currentState.GetTurn() == me.side {
 						if nextScore > bestScore {
 							bestScore = nextScore
 						}
@@ -134,8 +150,14 @@ func (me *lmsEvaluator) Learn() {
 			}
 		}
 
+		// Use the latest weights to approximate the score
+		approxScore = 0
+		for j := 0; j < 6; j++ {
+			approxScore += me.featuresList[i][j] * me.Coeffs[j]
+		}
+
 		// Update the weight using the error for the feature
-		if successorExists {
+		if successorExists && !math.IsInf(bestScore, 0) {
 			for j := 0; j < 6; j++ {
 				me.Coeffs[j] +=
 					mu * (bestScore - approxScore) *
@@ -146,9 +168,10 @@ func (me *lmsEvaluator) Learn() {
 	}
 
 	// Clear the scores and features
-	me.featuresList = make([][6]float64, 0, cap(me.featuresList))
-	me.boardList = make([]c4.State, 0, cap(me.boardList))
-	me.scoreMemo = make(map[c4.State]float64)
+	me.featuresList = me.featuresList[0:0]
+	me.stateList = me.stateList[0:0]
+	me.scoreMemo = make(map[board]float64)
+
 	fmt.Println(count)
 }
 
@@ -188,6 +211,13 @@ func main() {
 			}
 		}
 	}
+
+	// If we've got evalFuncs loaded, then we need to initialize the private
+	// fields
+	for i, _ := range evalFuncs {
+		evalFuncs[i].Init()
+	}
+
 	// Otherwise, generate them randomly. This also fills up empty space
 	// if not enough load
 	for i := len(evalFuncs); i < PopSize; i++ {
@@ -221,6 +251,19 @@ func main() {
 	for {
 		for g1 = 0; g1 < PopSize; g1++ {
 			for g2 = 0; g2 < PopSize; g2++ {
+				// Memory profiling stuff
+				// memstats := new(runtime.MemStats)
+				// runtime.ReadMemStats(memstats)
+				// log.Printf("memstats before GC: bytes = %d footprint = %d",
+				// 	memstats.HeapAlloc, memstats.Sys)
+
+				// f, err := os.Create("bah.mprof")
+				// if err != nil {
+				// 	log.Fatal(err)
+				// }
+				// pprof.WriteHeapProfile(f)
+				// f.Close()
+
 				fmt.Printf(
 					"\nIteration %v, coeffs %v/%v vs coeffs %v/%v:\n\t"+
 						"%v (%v wins)\n\tvs\n\t%v (%v wins)\n",
